@@ -2,3 +2,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #f8f9ff;
+  color: #0d1c2e;
+  font-family: 'Inter', sans-serif;
+}

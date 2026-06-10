@@ -20,8 +20,14 @@ export default function Dashboard() {
         </h1>
         <p className="text-on-surface-variant mt-2 text-sm">Dashboard coming in Phase 6</p>
         <button
+          onClick={() => navigate("/generate")}
+          className="mt-4 px-4 py-2 text-sm font-semibold text-on-primary bg-secondary rounded-lg hover:opacity-90 transition"
+        >
+          ✦ Generate Questions
+        </button>
+        <button
           onClick={handleSignOut}
-          className="mt-6 px-4 py-2 text-sm font-semibold text-error border border-error rounded-lg hover:bg-error-container transition"
+          className="mt-4 ml-3 px-4 py-2 text-sm font-semibold text-error border border-error rounded-lg hover:bg-error-container transition"
         >
           Sign out
         </button>

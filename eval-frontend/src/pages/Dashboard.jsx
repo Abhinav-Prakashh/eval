@@ -18,7 +18,9 @@ export default function Dashboard() {
         <h1 className="text-2xl font-semibold text-on-surface">
           Welcome, {user?.displayName || user?.email} 👋
         </h1>
-        <p className="text-on-surface-variant mt-2 text-sm">Dashboard coming in Phase 6</p>
+        <p className="text-on-surface-variant mt-2 text-sm">
+          Dashboard coming in Phase 6
+        </p>
         <button
           onClick={() => navigate("/generate")}
           className="mt-4 px-4 py-2 text-sm font-semibold text-on-primary bg-secondary rounded-lg hover:opacity-90 transition"
@@ -30,6 +32,18 @@ export default function Dashboard() {
           className="mt-4 ml-3 px-4 py-2 text-sm font-semibold text-error border border-error rounded-lg hover:bg-error-container transition"
         >
           Sign out
+        </button>
+        <button
+          onClick={() => navigate("/question-bank")}
+          className="mt-4 ml-3 px-4 py-2 text-sm font-semibold text-on-primary bg-primary rounded-lg hover:bg-primary-container transition"
+        >
+          📋 Question Bank
+        </button>
+        <button
+          onClick={() => navigate("/omr-generator")}
+          className="mt-4 ml-3 px-4 py-2 text-sm font-semibold text-on-primary bg-primary rounded-lg hover:bg-primary-container transition"
+        >
+          📄 OMR Sheet
         </button>
       </div>
     </div>

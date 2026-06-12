@@ -45,6 +45,12 @@ export default function Dashboard() {
         >
           📄 OMR Sheet
         </button>
+        <button
+          onClick={() => navigate("/omr-evaluator")}
+          className="mt-4 ml-3 px-4 py-2 text-sm font-semibold text-on-primary bg-primary rounded-lg hover:bg-primary-container transition"
+        >
+          🔍 Evaluate OMR
+        </button>
       </div>
     </div>
   );

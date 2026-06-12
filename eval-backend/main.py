@@ -5,6 +5,10 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from google import genai
 from dotenv import load_dotenv
+import cv2
+import numpy as np
+from fastapi import File, UploadFile, Form
+import base64
 import os
 import json
 import io
@@ -365,3 +369,175 @@ async def generate_omr_sheet(config: OMRConfig, user=Depends(get_current_user)):
     filename = f"{config.title.replace(' ', '_')}_OMR_sheet.pdf"
     return Response(content=pdf_bytes, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+class AnswerKey(BaseModel):
+    answers: list[str]  # e.g. ["A", "B", "C", "D", "A", ...]
+    num_options: int = 4
+
+@app.post("/api/omr/evaluate")
+async def evaluate_omr(
+    file: UploadFile = File(...),
+    answers: str = Form(...),
+    num_options: int = Form(4),
+    user=Depends(get_current_user)
+):
+    try:
+        # Read image
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            raise HTTPException(status_code=400, detail="Could not read image")
+
+        answer_key = json.loads(answers)
+        num_questions = len(answer_key)
+        option_labels = ['A', 'B', 'C', 'D', 'E'][:num_options]
+
+        # ── Preprocess ──────────────────────────────────────
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        thresh = cv2.adaptiveThreshold(
+            blurred, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+
+        # ── Find contours ────────────────────────────────────
+        contours, _ = cv2.findContours(
+            thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        # Filter for circle-like contours (bubbles)
+        bubbles = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 100 or area > 5000:
+                continue
+            perimeter = cv2.arcLength(cnt, True)
+            if perimeter == 0:
+                continue
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
+            if circularity > 0.55:  # reasonably circular
+                (x, y), radius = cv2.minEnclosingCircle(cnt)
+                bubbles.append({
+                    "x": float(x),
+                    "y": float(y),
+                    "r": float(radius),
+                    "area": float(area),
+                    "contour": cnt
+                })
+
+        if len(bubbles) < num_questions * num_options:
+            # Not enough bubbles found — return error with debug info
+            raise HTTPException(
+                status_code=422,
+                detail=f"Only found {len(bubbles)} bubbles, expected at least {num_questions * num_options}. Try a clearer photo with better lighting."
+            )
+
+        # ── Sort bubbles into grid ───────────────────────────
+        # Sort by Y (row) then X (column)
+        bubbles.sort(key=lambda b: (round(b["y"] / 15), b["x"]))
+
+        # Group into rows by proximity
+        rows = []
+        current_row = [bubbles[0]]
+        for b in bubbles[1:]:
+            if abs(b["y"] - current_row[0]["y"]) < 15:
+                current_row.append(b)
+            else:
+                rows.append(sorted(current_row, key=lambda x: x["x"]))
+                current_row = [b]
+        rows.append(sorted(current_row, key=lambda x: x["x"]))
+
+        # Filter rows that have exactly num_options bubbles
+        valid_rows = [r for r in rows if len(r) == num_options]
+
+        if len(valid_rows) < num_questions:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Could only detect {len(valid_rows)} valid question rows, need {num_questions}. Try a clearer photo."
+            )
+
+        valid_rows = valid_rows[:num_questions]
+
+        # ── Check which bubble is filled ─────────────────────
+        results = []
+        score = 0
+
+        for i, row in enumerate(valid_rows):
+            filled_idx = -1
+            max_fill = 0
+
+            for j, bubble in enumerate(row):
+                # Create mask for this bubble
+                mask = np.zeros(gray.shape, dtype=np.uint8)
+                cv2.circle(
+                    mask,
+                    (int(bubble["x"]), int(bubble["y"])),
+                    int(bubble["r"] * 0.8),
+                    255, -1
+                )
+                # Count filled pixels inside bubble
+                masked = cv2.bitwise_and(thresh, thresh, mask=mask)
+                fill_count = cv2.countNonZero(masked)
+                fill_ratio = fill_count / (np.pi * (bubble["r"] * 0.8) ** 2)
+
+                if fill_ratio > max_fill:
+                    max_fill = fill_ratio
+                    filled_idx = j
+
+            # Only count as answered if fill ratio is significant
+            if max_fill < 0.25:
+                selected = None  # unanswered
+            else:
+                selected = option_labels[filled_idx] if filled_idx >= 0 else None
+
+            correct = answer_key[i] if i < len(answer_key) else None
+            is_correct = selected == correct
+
+            if is_correct and selected is not None:
+                score += 1
+
+            results.append({
+                "question": i + 1,
+                "selected": selected,
+                "correct": correct,
+                "is_correct": is_correct,
+            })
+
+        # ── Annotated image ──────────────────────────────────
+        annotated = img.copy()
+        for i, row in enumerate(valid_rows):
+            correct_ans = answer_key[i] if i < len(answer_key) else None
+            for j, bubble in enumerate(row):
+                selected_label = results[i]["selected"]
+                current_label = option_labels[j]
+                cx, cy, r = int(bubble["x"]), int(bubble["y"]), int(bubble["r"])
+
+                if current_label == selected_label and current_label == correct_ans:
+                    color = (0, 200, 0)   # green = correct
+                elif current_label == selected_label:
+                    color = (0, 0, 220)   # red = wrong selection
+                elif current_label == correct_ans:
+                    color = (0, 165, 255) # orange = correct answer indicator
+                else:
+                    color = (180, 180, 180)
+
+                cv2.circle(annotated, (cx, cy), r, color, 2)
+
+        _, img_encoded = cv2.imencode('.jpg', annotated)
+        annotated_b64 = base64.b64encode(img_encoded.tobytes()).decode('utf-8')
+
+        return {
+            "score": score,
+            "total": num_questions,
+            "percentage": round(score / num_questions * 100, 1),
+            "results": results,
+            "annotated_image": annotated_b64
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")

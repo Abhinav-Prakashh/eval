@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import QuestionGenerator from "./pages/QuestionGenerator";
 import QuestionBank from "./pages/QuestionBank";
 import OMRGenerator from "./pages/OMRGenerator";
+import OMREvaluator from "./pages/OMREvaluator";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="/generate" element={<ProtectedRoute><QuestionGenerator /></ProtectedRoute>} />
           <Route path="/question-bank" element={<ProtectedRoute><QuestionBank /></ProtectedRoute>} />
           <Route path="/omr-generator" element={<ProtectedRoute><OMRGenerator /></ProtectedRoute>} />
+          <Route path="/omr-evaluator" element={<ProtectedRoute><OMREvaluator /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>

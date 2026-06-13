@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Header, Response
+from fastapi import FastAPI, Depends, HTTPException, Header, Response, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import firebase_admin
@@ -7,7 +7,6 @@ from google import genai
 from dotenv import load_dotenv
 import cv2
 import numpy as np
-from fastapi import File, UploadFile, Form
 import base64
 import os
 import json
@@ -109,7 +108,6 @@ class OMRGrid(Flowable):
         for side in range(2):
             x_origin = side * (self.side_w + self.gap)
 
-            # Header row
             y = self.total_h - self.cell_h
             c.setFont("Helvetica-Bold", 8)
             c.setFillColor(colors.HexColor('#00288e'))
@@ -122,7 +120,6 @@ class OMRGrid(Flowable):
             c.setLineWidth(0.4)
             c.line(x_origin, y, x_origin + self.side_w, y)
 
-            # Question rows
             start_q = side * qpc + 1
             end_q = min(start_q + qpc - 1, self.num_questions)
 
@@ -155,6 +152,7 @@ class OMRGrid(Flowable):
             c.setStrokeColor(colors.HexColor('#c4c5d5'))
             c.setLineWidth(0.5)
             c.rect(x_origin, 0, self.side_w, self.total_h, fill=0, stroke=1)
+
 
 # ── Routes ───────────────────────────────────────────────────
 @app.get("/")
@@ -224,6 +222,18 @@ async def get_questions(user=Depends(get_current_user)):
         q["id"] = doc.id
         questions.append(q)
     return {"questions": questions}
+
+@app.get("/api/results")
+async def get_results(user=Depends(get_current_user)):
+    uid = user["uid"]
+    docs = db.collection("omr_results").where("uid", "==", uid).stream()
+    results = []
+    for doc in docs:
+        r = doc.to_dict()
+        r["id"] = doc.id
+        r.pop("annotated_image", None)
+        results.append(r)
+    return {"results": results}
 
 # ── Question Paper PDF ───────────────────────────────────────
 @app.post("/api/paper/generate-pdf")
@@ -370,10 +380,7 @@ async def generate_omr_sheet(config: OMRConfig, user=Depends(get_current_user)):
     return Response(content=pdf_bytes, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"})
 
-class AnswerKey(BaseModel):
-    answers: list[str]  # e.g. ["A", "B", "C", "D", "A", ...]
-    num_options: int = 4
-
+# ── OMR Evaluate ─────────────────────────────────────────────
 @app.post("/api/omr/evaluate")
 async def evaluate_omr(
     file: UploadFile = File(...),
@@ -382,7 +389,6 @@ async def evaluate_omr(
     user=Depends(get_current_user)
 ):
     try:
-        # Read image
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -394,7 +400,6 @@ async def evaluate_omr(
         num_questions = len(answer_key)
         option_labels = ['A', 'B', 'C', 'D', 'E'][:num_options]
 
-        # ── Preprocess ──────────────────────────────────────
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         thresh = cv2.adaptiveThreshold(
@@ -403,12 +408,10 @@ async def evaluate_omr(
             cv2.THRESH_BINARY_INV, 11, 2
         )
 
-        # ── Find contours ────────────────────────────────────
         contours, _ = cv2.findContours(
             thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        # Filter for circle-like contours (bubbles)
         bubbles = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
@@ -418,7 +421,7 @@ async def evaluate_omr(
             if perimeter == 0:
                 continue
             circularity = 4 * np.pi * area / (perimeter * perimeter)
-            if circularity > 0.55:  # reasonably circular
+            if circularity > 0.55:
                 (x, y), radius = cv2.minEnclosingCircle(cnt)
                 bubbles.append({
                     "x": float(x),
@@ -429,17 +432,13 @@ async def evaluate_omr(
                 })
 
         if len(bubbles) < num_questions * num_options:
-            # Not enough bubbles found — return error with debug info
             raise HTTPException(
                 status_code=422,
                 detail=f"Only found {len(bubbles)} bubbles, expected at least {num_questions * num_options}. Try a clearer photo with better lighting."
             )
 
-        # ── Sort bubbles into grid ───────────────────────────
-        # Sort by Y (row) then X (column)
         bubbles.sort(key=lambda b: (round(b["y"] / 15), b["x"]))
 
-        # Group into rows by proximity
         rows = []
         current_row = [bubbles[0]]
         for b in bubbles[1:]:
@@ -450,7 +449,6 @@ async def evaluate_omr(
                 current_row = [b]
         rows.append(sorted(current_row, key=lambda x: x["x"]))
 
-        # Filter rows that have exactly num_options bubbles
         valid_rows = [r for r in rows if len(r) == num_options]
 
         if len(valid_rows) < num_questions:
@@ -461,7 +459,6 @@ async def evaluate_omr(
 
         valid_rows = valid_rows[:num_questions]
 
-        # ── Check which bubble is filled ─────────────────────
         results = []
         score = 0
 
@@ -470,7 +467,6 @@ async def evaluate_omr(
             max_fill = 0
 
             for j, bubble in enumerate(row):
-                # Create mask for this bubble
                 mask = np.zeros(gray.shape, dtype=np.uint8)
                 cv2.circle(
                     mask,
@@ -478,7 +474,6 @@ async def evaluate_omr(
                     int(bubble["r"] * 0.8),
                     255, -1
                 )
-                # Count filled pixels inside bubble
                 masked = cv2.bitwise_and(thresh, thresh, mask=mask)
                 fill_count = cv2.countNonZero(masked)
                 fill_ratio = fill_count / (np.pi * (bubble["r"] * 0.8) ** 2)
@@ -487,9 +482,8 @@ async def evaluate_omr(
                     max_fill = fill_ratio
                     filled_idx = j
 
-            # Only count as answered if fill ratio is significant
             if max_fill < 0.25:
-                selected = None  # unanswered
+                selected = None
             else:
                 selected = option_labels[filled_idx] if filled_idx >= 0 else None
 
@@ -506,7 +500,6 @@ async def evaluate_omr(
                 "is_correct": is_correct,
             })
 
-        # ── Annotated image ──────────────────────────────────
         annotated = img.copy()
         for i, row in enumerate(valid_rows):
             correct_ans = answer_key[i] if i < len(answer_key) else None
@@ -516,11 +509,11 @@ async def evaluate_omr(
                 cx, cy, r = int(bubble["x"]), int(bubble["y"]), int(bubble["r"])
 
                 if current_label == selected_label and current_label == correct_ans:
-                    color = (0, 200, 0)   # green = correct
+                    color = (0, 200, 0)
                 elif current_label == selected_label:
-                    color = (0, 0, 220)   # red = wrong selection
+                    color = (0, 0, 220)
                 elif current_label == correct_ans:
-                    color = (0, 165, 255) # orange = correct answer indicator
+                    color = (0, 165, 255)
                 else:
                     color = (180, 180, 180)
 
@@ -528,6 +521,17 @@ async def evaluate_omr(
 
         _, img_encoded = cv2.imencode('.jpg', annotated)
         annotated_b64 = base64.b64encode(img_encoded.tobytes()).decode('utf-8')
+
+        result_doc = {
+            "uid": user["uid"],
+            "score": score,
+            "total": num_questions,
+            "percentage": round(score / num_questions * 100, 1),
+            "results": results,
+            "answer_key": answer_key,
+            "timestamp": firestore.SERVER_TIMESTAMP,
+        }
+        db.collection("omr_results").add(result_doc)
 
         return {
             "score": score,

@@ -627,3 +627,53 @@ Return ONLY a valid JSON object. No markdown, no backticks, no explanation befor
         return analysis
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+    
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+@app.post("/api/admin/create-user")
+async def create_user(req: CreateUserRequest, user=Depends(get_current_user)):
+    # Check if requester is admin
+    uid = user["uid"]
+    doc = db.collection("admins").document(uid).get()
+    if not doc.exists:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    try:
+        new_user = auth.create_user(
+            email=req.email,
+            password=req.password,
+            display_name=req.name
+        )
+        return {"uid": new_user.uid, "email": new_user.email, "name": req.name}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/admin/users")
+async def list_users(user=Depends(get_current_user)):
+    uid = user["uid"]
+    doc = db.collection("admins").document(uid).get()
+    if not doc.exists:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    users = []
+    for u in auth.list_users().iterate_all():
+        users.append({
+            "uid": u.uid,
+            "email": u.email,
+            "name": u.display_name or "",
+            "disabled": u.disabled,
+        })
+    return {"users": users}
+
+@app.delete("/api/admin/users/{uid}")
+async def delete_user(uid: str, user=Depends(get_current_user)):
+    admin_uid = user["uid"]
+    doc = db.collection("admins").document(admin_uid).get()
+    if not doc.exists:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    auth.delete_user(uid)
+    return {"deleted": uid}

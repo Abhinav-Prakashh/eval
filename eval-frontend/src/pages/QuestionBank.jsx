@@ -106,13 +106,13 @@ export default function QuestionBank() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/generate")}
-            className="text-sm text-on-surface-variant hover:text-on-surface transition"
+            className="text-sm text-on-surface-variant hover:text-on-surface transition gap-10"
           >
             + Generate Questions
           </button>
           <button
             onClick={() => navigate("/dashboard")}
-            className="text-sm text-on-surface-variant hover:text-on-surface transition"
+            className="text-sm text-on-surface-variant hover:text-on-surface transition gap-3"
           >
             ← Dashboard
           </button>

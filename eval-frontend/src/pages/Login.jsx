@@ -30,11 +30,7 @@ export default function Login() {
 
         {/* Logo / Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary-container mb-4">
-            <svg className="w-6 h-6 text-on-primary" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
+          <img src="/src/assets/logo.png" alt="Eval" className="w-12 h-12 object-contain mb-4 mx-auto block"/>
           <h1 className="text-2xl font-semibold text-on-surface tracking-tight">Eval</h1>
           <p className="text-sm text-on-surface-variant mt-1">Sign in to your account</p>
         </div>

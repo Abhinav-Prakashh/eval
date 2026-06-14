@@ -192,10 +192,13 @@ Example format:
             contents=prompt
         )
         text = response.text.strip()
-        if text.startswith("```"):
+        if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        text = text[start:end]
         questions = json.loads(text.strip())
         return {"questions": questions}
     except Exception as e:
@@ -386,6 +389,8 @@ async def evaluate_omr(
     file: UploadFile = File(...),
     answers: str = Form(...),
     num_options: int = Form(4),
+    student_name: str = Form(""),
+    roll_number: str = Form(""),
     user=Depends(get_current_user)
 ):
     try:
@@ -524,6 +529,8 @@ async def evaluate_omr(
 
         result_doc = {
             "uid": user["uid"],
+            "student_name": student_name,
+            "roll_number": roll_number,
             "score": score,
             "total": num_questions,
             "percentage": round(score / num_questions * 100, 1),
@@ -545,3 +552,78 @@ async def evaluate_omr(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+# ── AI Analytics ─────────────────────────────────────────────
+@app.post("/api/analytics/analyze")
+async def analyze_results(user=Depends(get_current_user)):
+    uid = user["uid"]
+    docs = db.collection("omr_results").where("uid", "==", uid).stream()
+    all_results = []
+    for doc in docs:
+        r = doc.to_dict()
+        r.pop("annotated_image", None)
+        all_results.append(r)
+
+    if not all_results:
+        raise HTTPException(status_code=400, detail="No results to analyze")
+
+    question_counts = {}
+    question_correct = {}
+    for r in all_results:
+        for q in r.get("results", []):
+            qn = q["question"]
+            question_counts[qn] = question_counts.get(qn, 0) + 1
+            if q["is_correct"]:
+                question_correct[qn] = question_correct.get(qn, 0) + 1
+
+    question_analysis = []
+    for qn in sorted(question_counts.keys()):
+        rate = round(question_correct.get(qn, 0) / question_counts[qn] * 100)
+        question_analysis.append({"question": qn, "correct_rate": rate})
+
+    avg = round(sum(r["percentage"] for r in all_results) / len(all_results), 1)
+    scores_summary = f"Average score: {avg}%. Scores range from {min(r['percentage'] for r in all_results)}% to {max(r['percentage'] for r in all_results)}%."
+    weak_questions = [q for q in question_analysis if q["correct_rate"] < 50]
+    strong_questions = [q for q in question_analysis if q["correct_rate"] >= 70]
+
+    prompt = f"""
+You are an educational analyst. Analyze these exam results and provide insights.
+
+Total evaluations: {len(all_results)}
+{scores_summary}
+Questions with low success rate (<50%): {[q['question'] for q in weak_questions]}
+Questions with high success rate (>=70%): {[q['question'] for q in strong_questions]}
+
+Per-question correct rates: {question_analysis}
+
+Return ONLY a valid JSON object. No markdown, no backticks, no explanation before or after.
+{{
+  "summary": "2-3 sentence overall class performance summary",
+  "learning_gaps": ["specific gap 1", "specific gap 2", "specific gap 3"],
+  "strong_areas": ["strong area 1", "strong area 2"],
+  "recommendations": ["actionable recommendation 1", "actionable recommendation 2", "actionable recommendation 3"]
+}}
+"""
+
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        text = response.text.strip()
+        # Remove markdown fences if present
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        # Extract JSON object by finding braces
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("No JSON object found in response")
+        text = text[start:end]
+        analysis = json.loads(text)
+        analysis["question_analysis"] = question_analysis
+        return analysis
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")

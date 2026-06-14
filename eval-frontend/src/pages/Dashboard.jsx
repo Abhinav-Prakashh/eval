@@ -88,9 +88,7 @@ export default function Dashboard() {
       {/* Nav */}
       <nav className="bg-surface-container-lowest border-b border-outline-variant px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center">
-            <span className="text-on-primary text-xs font-bold">E</span>
-          </div>
+          <img src="/src/assets/logo.png" alt="Eval" className="w-8 h-8 rounded-lg object-cover" />
           <span className="font-semibold text-on-surface">Eval</span>
         </div>
         <div className="flex items-center gap-4">
@@ -117,12 +115,14 @@ export default function Dashboard() {
         </div>
 
         {/* Quick actions */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-8">
           {[
             { label: "Generate Questions", icon: "✦", path: "/generate", color: "bg-secondary" },
             { label: "Question Bank", icon: "📋", path: "/question-bank", color: "bg-primary" },
             { label: "OMR Sheet", icon: "📄", path: "/omr-generator", color: "bg-primary" },
             { label: "Evaluate OMR", icon: "🔍", path: "/omr-evaluator", color: "bg-primary" },
+            { label: "Student Results", icon: "👩‍🎓", path: "/students", color: "bg-primary" },
+            { label: "AI Analytics", icon: "✦", path: "/analytics", color: "bg-secondary" },
           ].map(action => (
             <button
               key={action.path}

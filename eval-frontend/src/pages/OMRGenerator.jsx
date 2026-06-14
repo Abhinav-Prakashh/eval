@@ -60,9 +60,7 @@ export default function OMRGenerator() {
       {/* Nav */}
       <nav className="bg-surface-container-lowest border-b border-outline-variant px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center">
-            <span className="text-on-primary text-xs font-bold">E</span>
-          </div>
+          <img src="/src/assets/logo.png" alt="Eval" className="w-8 h-8 rounded-lg object-cover" />
           <span className="font-semibold text-on-surface">Eval</span>
         </div>
         <button

@@ -58,7 +58,7 @@ export default function Dashboard() {
     ? Math.max(...results.map(r => r.percentage))
     : 0;
 
-  // Chart data — last 10 evaluations
+
   const chartData = [...results]
     .sort((a, b) => {
       const ta = a.timestamp?.seconds || 0;
